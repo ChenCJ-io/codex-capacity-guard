@@ -1,16 +1,16 @@
 {
   "name": "codex-capacity-guard",
-  "version": "0.1.0",
+  "version": "0.1.0+codex.20260915095723",
   "description": "Wait for the original model and resume local Codex conversations after temporary capacity errors.",
   "author": {
-    "name": "ChenchunjieKK"
+    "name": "ChenCJ-io"
   },
   "skills": "./skills/",
   "interface": {
     "displayName": "Codex Capacity Guard",
     "shortDescription": "Automatically wait and resume after model capacity errors.",
     "longDescription": "An independent local watcher that retries capacity-failed conversations with the same model and original thread settings. No retry-count limit. Enable or disable explicitly.",
-    "developerName": "ChenchunjieKK",
+    "developerName": "ChenCJ-io",
     "category": "Productivity",
     "capabilities": [],
     "defaultPrompt": "Use Capacity Guard to check compatibility and enable recovery for model capacity errors."
