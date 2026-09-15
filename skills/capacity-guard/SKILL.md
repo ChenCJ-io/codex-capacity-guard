@@ -17,6 +17,9 @@ relative to this skill's directory; do not assume a particular installation path
 
 The watcher runs independently of model calls. It reacts only to new, genuine
 capacity errors in the local Codex runtime log, then continues the same conversation.
+For ordinary Codex CLI sessions the default `auto` backend uses `codex queue`,
+which talks to the existing local app-server and preserves the session's model.
+Use `configure --backend desktop` only for the desktop app's private IPC adapter.
 It waits indefinitely using increasing intervals and jitter. Never switch models,
 providers, accounts, reasoning settings or permissions to get around an error.
 

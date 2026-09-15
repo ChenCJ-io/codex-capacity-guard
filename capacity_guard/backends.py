@@ -3,7 +3,11 @@
 from __future__ import annotations
 
 import re
+import json
+import os
+import sqlite3
 import stat
+import subprocess
 from pathlib import Path
 
 from .config import Settings, codex_home, find_codex
@@ -12,6 +16,14 @@ from .transport import AppServerClient, TransportError
 
 
 class BackendUnavailable(TransportError):
+    outcome_unknown = False
+
+
+class QueueOutcomeUnknown(TransportError):
+    outcome_unknown = True
+
+
+class QueueUnavailable(BackendUnavailable):
     outcome_unknown = False
 
 
@@ -60,9 +72,12 @@ class CodexBackend:
             return self.client
         kind = self.settings.backend
         if kind == "auto":
-            # A custom socket explicitly selects app-server. Otherwise prioritize
-            # the desktop owner; do not try an unrelated server after a write.
-            kind = "app-server" if self.settings.socket_path else "desktop"
+            # Normal CLI sessions are reached through the stable queue command.
+            kind = "app-server" if self.settings.socket_path else "queue"
+        if kind == "queue":
+            self.client = QueueBackend(self.settings)
+            self.kind = kind
+            return self.client
         if kind == "desktop":
             from .desktop import DesktopClient
             self.client = DesktopClient(self.settings.socket_path, timeout=10)
@@ -107,7 +122,7 @@ class CodexBackend:
         # Without a thread this checks only local prerequisites, not app state.
         kind = self.settings.backend
         if kind == "auto":
-            kind = "app-server" if self.settings.socket_path else "desktop"
+            kind = "app-server" if self.settings.socket_path else "queue"
         path = Path(self.settings.socket_path) if self.settings.socket_path else codex_home() / "ipc" / "ipc.sock" if kind == "desktop" else None
         available = False
         if path:
@@ -121,3 +136,90 @@ class CodexBackend:
         if self.client:
             self.client.close()
         self.client = None
+
+
+class QueueBackend:
+    """Continue an ordinary local Codex CLI session via `codex queue`."""
+
+    def __init__(self, settings: Settings):
+        self.settings = settings
+        self.codex_bin = settings.codex_bin or find_codex()
+
+    def _state_db(self) -> Path:
+        candidates = sorted(codex_home().glob("state_*.sqlite"), key=lambda p: p.stat().st_mtime, reverse=True)
+        for path in candidates:
+            if path.is_file():
+                return path
+        raise QueueUnavailable("Codex state database is unavailable")
+
+    def _thread_row(self, thread_id: str) -> tuple:
+        try:
+            with sqlite3.connect("file:" + str(self._state_db()) + "?mode=ro", uri=True, timeout=0.5) as db:
+                row = db.execute("SELECT rollout_path,model,archived FROM threads WHERE id=?", (thread_id,)).fetchone()
+        except (OSError, sqlite3.Error):
+            raise QueueUnavailable("Codex state database is unavailable") from None
+        if not row or row[2]:
+            raise QueueUnavailable("Codex session is unavailable")
+        return row
+
+    @staticmethod
+    def _rollout_snapshot(path: Path, thread_id: str, model: str) -> Snapshot:
+        latest_id = latest_status = latest_token = None
+        try:
+            with path.open("r", encoding="utf-8", errors="replace") as stream:
+                for line in stream:
+                    try:
+                        payload = json.loads(line).get("payload", {})
+                    except (ValueError, TypeError):
+                        continue
+                    if not isinstance(payload, dict) or payload.get("thread_id") not in (None, thread_id):
+                        continue
+                    kind = payload.get("type")
+                    if kind == "task_started" and isinstance(payload.get("turn_id"), str):
+                        latest_id, latest_status, latest_token = payload["turn_id"], "inProgress", None
+                    elif kind == "task_complete" and payload.get("turn_id") == latest_id:
+                        latest_status = "failed" if payload.get("error") else "completed"
+                    elif kind in {"message", "item_completed"} and latest_id:
+                        item = payload if kind == "message" else payload.get("item", {})
+                        if kind == "message" and item.get("role") != "user":
+                            continue
+                        if kind == "item_completed" and item.get("type") != "UserMessage":
+                            continue
+                        text = "".join(item.get("text", "") for item in item.get("content", []) if isinstance(item, dict) and isinstance(item.get("text"), str))
+                        match = re.search(re.escape(MESSAGE_PREFIX) + r"([a-f0-9-]{36})\]", text)
+                        if match:
+                            latest_token = match.group(1)
+        except (OSError, UnicodeError):
+            raise QueueUnavailable("Codex session history is unavailable") from None
+        if not latest_id or not latest_status:
+            raise QueueUnavailable("Codex session history is unavailable")
+        return Snapshot(latest_id, latest_status, model or "", latest_token, True, False)
+
+    def inspect(self, thread_id: str) -> Snapshot:
+        rollout, model, _ = self._thread_row(thread_id)
+        return self._rollout_snapshot(Path(rollout), thread_id, model)
+
+    def resume(self, thread_id: str, message: str, model: str) -> str | None:
+        # Deliberately omit --model: Codex queue uses the persisted session model.
+        try:
+            result = subprocess.run([self.codex_bin, "queue", "--thread", thread_id, "--message", message], stdin=subprocess.DEVNULL, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, timeout=60, env=os.environ.copy())
+        except subprocess.TimeoutExpired:
+            raise QueueOutcomeUnknown("Codex queue request timed out") from None
+        except OSError:
+            raise QueueUnavailable("Codex queue is unavailable") from None
+        if result.returncode:
+            raise QueueUnavailable("Codex queue rejected the continuation")
+        return None
+
+    def diagnose(self, thread_id: str | None = None) -> dict:
+        result = {"connection": "ready", "backend": "queue", "delivery_tested": False, "codex_bin": self.codex_bin}
+        if thread_id:
+            try:
+                snapshot = self.inspect(thread_id)
+                result.update(latest_turn_status=snapshot.status, model_known=bool(snapshot.model))
+            except Exception as error:
+                result.update(connection="unavailable", reason=type(error).__name__)
+        return result
+
+    def close(self) -> None:
+        return None

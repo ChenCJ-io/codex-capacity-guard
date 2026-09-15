@@ -77,7 +77,7 @@ def main(argv: list[str] | None = None) -> int:
     configure.add_argument("--jitter", type=float)
     configure.add_argument("--codex-bin")
     configure.add_argument("--socket-path")
-    configure.add_argument("--backend", choices=["auto", "desktop", "app-server"])
+    configure.add_argument("--backend", choices=["auto", "queue", "desktop", "app-server"])
     hook_parser = commands.add_parser("hook", help=argparse.SUPPRESS)
     hook_parser.add_argument("event", choices=["SessionStart", "UserPromptSubmit", "Interrupt", "SessionEnd"])
     args = parser.parse_args(argv)

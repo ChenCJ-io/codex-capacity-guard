@@ -31,10 +31,11 @@
 
 | 后端 | 连接方式 | 兼容边界 |
 | --- | --- | --- |
+| `queue` | 调用已安装 Codex CLI 的 `queue --thread … --message …`。 | 普通 CLI 会话的默认路径；本地 App Server 需要支持 `thread/queue/add`。 |
 | `app-server` | 通过显式配置的 Unix socket，以 WebSocket 接入现有 App Server，再调用 `turn/start`。 | 现有服务必须提供兼容的控制 socket，并拥有目标会话。 |
 | `desktop` | 连接正在运行的桌面应用的本地 IPC。 | 这是**私有、依赖版本的接口**，不是官方稳定的插件 API；应用更新后可能需要更新适配。 |
 
-`auto` 默认使用桌面后端；显式配置 socket 路径时使用 App Server。它不会在发送请求后切换连接到另一个 owner。插件不会另起一个 App Server 接管桌面会话。后端暂时不可用时，恢复任务保留等待，并记录诊断信息，不会因此切换模型。
+`auto` 默认使用 `queue` 恢复普通 CLI 会话；显式配置 socket 时使用 App Server。桌面应用的私有 IPC 需要显式设置 `backend=desktop`。它不会在发送请求后切换连接到另一个 owner，也不会另起一个 App Server 接管桌面会话。后端暂时不可用时，恢复任务保留等待，并记录诊断信息，不会因此切换模型。
 
 日志结构和运行时错误格式也属于内部接口。此版本不承诺兼容所有 Codex 版本、所有操作系统或远程/云端任务。离线测试验证核心行为，`doctor` 检查本机运行前提。
 
@@ -91,7 +92,7 @@ python3 -m venv .venv
 }
 ```
 
-`codex_bin` 留空时自动查找可执行文件，也可以设置 `CODEX_CAPACITY_GUARD_CODEX`。`socket_path` 用于指定现有 App Server 的控制 socket；配合 `backend=desktop` 时也可指定桌面 IPC socket。修改配置后先 `disable`，再 `enable`。
+`codex_bin` 留空时优先查找 PATH 中的 `codex`，也可以设置 `CODEX_CAPACITY_GUARD_CODEX`。`socket_path` 用于指定现有 App Server 或桌面 IPC socket。修改配置后先 `disable`，再 `enable`。
 
 插件在本地保存调度状态、会话和回合 ID、模型名及有限条审计记录，不会将完整聊天记录、错误正文或凭据复制进状态数据库。为了避免恢复过期错误，会向本地应用读取会话元数据。恢复后的 Codex 回合仍按照原会话的授权使用网络和工具。
 

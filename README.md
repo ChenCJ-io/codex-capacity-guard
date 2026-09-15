@@ -31,10 +31,11 @@ There are two connection backends:
 
 | Backend | Connection | Compatibility boundary |
 | --- | --- | --- |
+| `queue` | The installed Codex CLI's `queue --thread … --message …` command. | Default for ordinary CLI sessions; the local app-server must support `thread/queue/add`. The guard omits `--model`, so the persisted model is retained. |
 | `app-server` | WebSocket over an explicitly configured existing Unix socket; recovery uses `turn/start`. | The existing server must expose a compatible control socket and own the conversation. |
 | `desktop` | Connects to the running desktop application's local IPC. | This is a **private, version-sensitive interface**, not a supported public plugin API. Desktop updates may require an adapter update. |
 
-`auto` uses the desktop backend unless a socket path is explicitly configured; it then uses App Server. It does not fall back between owners after a request. The guard does not launch a replacement App Server to take over an existing conversation. An unavailable backend leaves recovery waiting and surfaces a diagnostic; it is not a reason to change models.
+`auto` uses `queue` for ordinary CLI sessions; an explicit socket path selects `app-server`. The desktop adapter is opt-in with `backend=desktop`. It does not fall back between owners after a request. The guard does not launch a replacement App Server to take over an existing conversation. An unavailable backend leaves recovery waiting and surfaces a diagnostic; it is not a reason to change models.
 
 The log schema and runtime error format are also internal interfaces. This release does not claim compatibility with every Codex version, remote/cloud tasks, or every operating system. Offline tests cover the core logic; `doctor` checks your local prerequisites.
 
@@ -91,7 +92,7 @@ The state directory defaults to `$CODEX_HOME/capacity-guard`, or `~/.codex/capac
 }
 ```
 
-An empty `codex_bin` uses automatic discovery. You can also set `CODEX_CAPACITY_GUARD_CODEX` to the Codex executable path. A non-null `socket_path` specifies an existing App Server control socket. Disable and enable the guard after editing configuration.
+An empty `codex_bin` uses the `codex` executable on PATH (then the desktop-bundled CLI). You can also set `CODEX_CAPACITY_GUARD_CODEX`. A non-null `socket_path` selects the App Server backend. Disable and enable the guard after editing configuration.
 
 The guard stores scheduling state, conversation/turn IDs, model names, and a bounded audit trail locally. It does not copy full chat transcripts, log bodies, or credentials into its state database. It reads conversation metadata from the local application to avoid resuming a stale failure. The original Codex turn may use network access and tools as authorized by that conversation.
 

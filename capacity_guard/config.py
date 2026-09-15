@@ -23,9 +23,8 @@ def find_codex() -> str:
     if explicit:
         return explicit
     desktop = Path("/Applications/ChatGPT.app/Contents/Resources/codex")
-    if desktop.is_file():
-        return str(desktop)
-    return shutil.which("codex") or "codex"
+    # Prefer the CLI on PATH: it is the process that produced normal TUI logs.
+    return shutil.which("codex") or (str(desktop) if desktop.is_file() else "codex")
 
 
 @dataclass(frozen=True)
@@ -48,8 +47,8 @@ class Settings:
             raise ValueError("poll_interval must be between 0.2 and 60 seconds.")
         if not 0 <= self.jitter <= 0.5:
             raise ValueError("jitter must be between 0 and 0.5.")
-        if self.backend not in {"auto", "app-server", "desktop"}:
-            raise ValueError("backend must be auto, app-server, or desktop.")
+        if self.backend not in {"auto", "queue", "app-server", "desktop"}:
+            raise ValueError("backend must be auto, queue, app-server, or desktop.")
 
     def delay(self, attempts: int, random_fraction: float = 0.5) -> float:
         # Bound the exponent even after months of capacity failures.
