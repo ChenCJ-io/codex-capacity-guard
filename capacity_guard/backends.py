@@ -88,8 +88,11 @@ class CodexBackend:
 
     def inspect(self, thread_id: str) -> Snapshot:
         try:
-            thread = self._connect().read_thread(thread_id)
-            result = snapshot_from_thread(thread)
+            client = self._connect()
+            if self.kind == "queue":
+                result = client.inspect(thread_id)
+            else:
+                result = snapshot_from_thread(client.read_thread(thread_id))
             self.expected[thread_id] = result.turn_id
             return result
         except Exception:
@@ -103,6 +106,12 @@ class CodexBackend:
             raise BackendUnavailable("Inspect the failed turn before continuation")
         if self.kind == "desktop":
             result = client.start_turn(thread_id, message, model, expected_turn_id=expected)
+        elif self.kind == "queue":
+            current = client.inspect(thread_id)
+            if not current.eligible or current.turn_id != expected or current.status != "failed" or current.has_draft or (current.model and current.model != model):
+                raise BackendUnavailable("Conversation changed before continuation")
+            client.resume(thread_id, message, model)
+            return None
         else:
             current = snapshot_from_thread(client.read_thread(thread_id))
             if not current.eligible or current.turn_id != expected or current.status != "failed" or current.has_draft or (current.model and current.model != model):

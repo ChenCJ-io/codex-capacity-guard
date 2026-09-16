@@ -1,6 +1,6 @@
 {
   "name": "codex-capacity-guard",
-  "version": "0.1.0+codex.20260916024235",
+  "version": "0.1.0+codex.20260916120000",
   "description": "Wait for the original model and resume local Codex conversations after temporary capacity errors.",
   "author": {
     "name": "ChenCJ-io"
