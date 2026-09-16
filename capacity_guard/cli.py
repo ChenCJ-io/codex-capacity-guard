@@ -41,7 +41,10 @@ def hook(event: str) -> int:
                     pending = store.recovery(thread_id)
                     expected = f"{MESSAGE_PREFIX}{pending['token']}]" if pending and pending.get("token") else None
                     own = expected is not None and isinstance(text, str) and text.startswith(expected + "\n") and pending["status"] in {"sending", "uncertain", "submitted"}
-                    if not own:
+                    # Returning the TUI to its input prompt can emit this hook
+                    # after a capacity failure. Keep a still-waiting recovery;
+                    # the watcher validates the latest persisted turn itself.
+                    if pending and pending["status"] in {"sending", "uncertain", "submitted"} and not own:
                         store.cancel(thread_id, "user_prompt")
                 elif event in {"Interrupt", "SessionEnd"}:
                     store.cancel(thread_id, "interrupt" if event == "Interrupt" else "session_end")

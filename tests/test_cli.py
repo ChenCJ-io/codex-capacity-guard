@@ -43,10 +43,19 @@ class CliTests(unittest.TestCase):
             with self.assertRaises(ValueError):
                 Settings(**values)
 
+    def test_hook_does_not_cancel_waiting_recovery_after_capacity_failure(self):
+        store = Store(self.directory / "guard")
+        self.addCleanup(store.close)
+        store.schedule(FailureEvent(1, 100, THREAD, TURN, "model", True), 130)
+        result = self.command("hook", "UserPromptSubmit", input=json.dumps({"session_id": THREAD, "prompt": ""}))
+        self.assertEqual(0, result.returncode)
+        self.assertEqual("waiting", store.recovery(THREAD)["status"])
+
     def test_hook_marks_manual_submission_and_never_restarts_disabled_guard(self):
         store = Store(self.directory / "guard")
         self.addCleanup(store.close)
         store.schedule(FailureEvent(1, 100, THREAD, TURN, "model", True), 130)
+        store.update(THREAD, status="sending", token=TURN)
         result = self.command("hook", "UserPromptSubmit", input=json.dumps({"session_id": THREAD, "prompt": "continue"}))
         self.assertEqual(0, result.returncode)
         self.assertEqual({}, json.loads(result.stdout))
