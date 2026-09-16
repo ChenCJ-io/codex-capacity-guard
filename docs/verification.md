@@ -1,4 +1,24 @@
-# Verification — 2026-09-15
+# Verification — updated 2026-09-16
+
+## Observed CLI recovery
+
+On Codex CLI 0.154.0 on macOS, the guard recorded a capacity failure, submitted
+one continuation through `codex queue`, observed that continuation fail with
+capacity again, and submitted a second continuation. The original thread and
+`gpt-6-astra` model were preserved. Distinct recovery tokens corresponded to
+distinct failed turns, not duplicate submissions for one turn.
+
+This confirms live CLI delivery and repeated retries. It does not imply that the
+model's capacity shortage ended or that every supported environment was tested.
+The local guard audit and Codex turn lifecycle were checked; private session IDs
+and transcript contents are intentionally omitted here.
+
+Runtime corrections include selecting the queue backend for normal CLI sessions
+and routing it through its `inspect` / `resume` interface. Watcher startup alone
+did not catch that integration error in the first release. Treat process checks,
+backend reads and actual continuation delivery as separate evidence.
+
+## Initial test environment
 
 The first release was developed and tested on macOS with Python 3.14 and Codex
 CLI 0.153.4. Runtime code targets Python 3.11+; GitHub CI tests 3.11–3.13 on Linux

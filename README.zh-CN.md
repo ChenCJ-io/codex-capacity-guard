@@ -2,134 +2,84 @@
 
 [English](README.md)
 
-当本地 Codex 的运行时出现以下错误时，自动等待并继续原会话：
+这是一个 **Codex CLI 插件**。当终端里的 Codex 出现：
 
 > Selected model is at capacity. Please try a different model.
 
-**始终使用原模型、原会话，不切换备用模型。** 容量错误反复出现时，持续等待，没有最大重试次数。
+插件会等待后自动继续**原会话、原模型**，容量不足时持续重试。
 
-这是独立的社区插件，不是 OpenAI 官方产品。目前为早期版本，启用前请运行 `doctor` 检查本机兼容性。**安装插件不会自动开启后台恢复。**
+**你照常启动 `codex` 即可，不需要追加启动参数，也不需要自己输入 `codex queue`。** 安装和日常开启都可以直接在 Codex 对话中完成。
 
-## 工作方式
+## 第一次使用：复制这一整段给 Codex
 
-1. 用户显式启用后，后台进程以只读方式扫描 Codex 本地 `logs_2.sqlite` 中的新回合错误。
-2. 只有运行时的容量错误会安排恢复。聊天或工具输出引用这句话不会触发。
-3. 等待一段时间后，检查原会话；失败回合仍符合恢复条件时，发送继续指令。
-4. 再次容量不足就继续等待；用户发起新回合、取消、出现其他错误或关闭插件时，停止该次恢复。
+在一个**能正常响应的 Codex CLI 对话**里，粘贴下面这段话：
 
-默认间隔从 30 秒增加到 60 秒、120 秒，之后保持约 120 秒；每次加入 ±15% 随机浮动。插件不能预留模型容量，也无法预测何时恢复。
+```text
+请帮我安装并开启 Codex Capacity Guard CLI 插件，仓库是 https://github.com/ChenCJ-io/codex-capacity-guard 。先阅读仓库 README 和安装脚本，确认本机是 macOS 或 Linux、Python 3.11 及以上，且 PATH 中的 Codex CLI 支持 queue 和 plugin add。把仓库克隆到 ~/plugins/codex-capacity-guard；如果已经安装，复用已有源码目录，不覆盖我的本地修改。使用 PATH 中的 codex 执行安装，运行 scripts/install_plugin.py 时用 --codex-bin 指定这个可执行文件。将 guard 的 backend 配置为 queue，codex_bin 配置为同一个可执行文件；保持我原来的模型、Provider、账号、推理强度和权限设置。如果旧版 watcher 还在运行，先 disable，等 status 确认 running=false 后，再从更新后的脚本启动。执行 scripts/capacity_guard.py enable 和 status --json，确认 enabled=true、running=true；若能取得当前会话 ID，再执行 doctor --thread 检查并单独报告结果，不把进程运行当作自动恢复成功。此次开启覆盖共用当前 CODEX_HOME 的本地会话。如果 Codex 要求信任 hooks，请明确告诉我在 /hooks 中需要确认什么，不绕过信任检查。最后告诉我安装版本、源码位置、运行状态、尚需处理的步骤，并给出以后在对话中开启、查看状态和关闭的方法。
+```
 
-首次启动从当前日志末尾开始，**不会重放历史错误**。如果会话在开启插件前就已经失败，请先手动继续一次；之后新出现的容量错误才会进入自动恢复流程。
+这段话会让 Codex 完成**安装、配置和开启**。单独运行安装脚本只会安装插件，不会自动开启恢复。插件沿用现有 Codex 配置，不需要另外申请模型 API Key。
 
-## 环境与兼容范围
+如果安装后找不到 `$capacity-guard`，重启 CLI，或在新的 CLI 进程中恢复原对话，让它加载新插件。若提示 hooks 待信任，进入 `/hooks` 审阅。**整个流程不需要桌面应用。**
 
-- macOS 或 Linux、Python 3.11 及以上，运行时仅使用 Python 标准库；暂不支持 Windows。
-- 本地 Codex 安装，其日志 SQLite 结构以及现有会话连接方式需要兼容。
-- Codex 应用或 App Server 保持运行。插件不能唤醒休眠电脑，也不会重启已关闭的应用。
+## 日常使用：在对话里唤醒
 
-支持两种连接后端：
+以后在 Codex CLI 对话里发送下面任意一条即可，每次只发送你需要的那一条：
 
-| 后端 | 连接方式 | 兼容边界 |
-| --- | --- | --- |
-| `queue` | 调用已安装 Codex CLI 的 `queue --thread … --message …`。 | 普通 CLI 会话的默认路径；本地 App Server 需要支持 `thread/queue/add`。 |
-| `app-server` | 通过显式配置的 Unix socket，以 WebSocket 接入现有 App Server，再调用 `turn/start`。 | 现有服务必须提供兼容的控制 socket，并拥有目标会话。 |
-| `desktop` | 连接正在运行的桌面应用的本地 IPC。 | 这是**私有、依赖版本的接口**，不是官方稳定的插件 API；应用更新后可能需要更新适配。 |
+| 你想做什么 | 复制到对话里的文字 |
+| --- | --- |
+| 开启自动恢复 | `$capacity-guard 开启自动恢复` |
+| 查看是否运行、重试了几次 | `$capacity-guard 查看恢复状态` |
+| 关闭自动恢复 | `$capacity-guard 关闭自动恢复` |
+| 只监控当前对话 | `$capacity-guard 只为当前会话开启自动恢复，使用当前会话 ID` |
+| 排查没有恢复的原因 | `$capacity-guard 排查当前会话为什么没有自动恢复，检查后端、watcher 和最近失败回合` |
 
-`auto` 默认使用 `queue` 恢复普通 CLI 会话；显式配置 socket 时使用 App Server。桌面应用的私有 IPC 需要显式设置 `backend=desktop`。它不会在发送请求后切换连接到另一个 owner，也不会另起一个 App Server 接管桌面会话。后端暂时不可用时，恢复任务保留等待，并记录诊断信息，不会因此切换模型。
+最常用的开启方式就是：
 
-日志结构和运行时错误格式也属于内部接口。此版本不承诺兼容所有 Codex 版本、所有操作系统或远程/云端任务。离线测试验证核心行为，`doctor` 检查本机运行前提。
+```text
+$capacity-guard 开启自动恢复
+```
 
-## 安装和开启
+开启后继续正常工作。**watcher 已启用且正在运行时，不用每轮都唤醒它。** 默认监控共用同一个 `CODEX_HOME` 的本地会话，不只限于你输入开启指令的那个对话；“只为当前会话开启”会把监控范围收窄到该会话。
 
-克隆或下载本项目，在项目根目录运行：
+## 报错之后会看到什么？
+
+容量错误发生后，插件约 **30 秒**后发起第一次续跑；如果新回合仍报容量不足，下一次约等 **60 秒**，之后约等 **120 秒**。每次有 ±15% 随机浮动，**没有最大重试次数**。
+
+对话中可能出现这样的消息：
+
+```text
+[codex-capacity-guard recovery=...]
+Continue the task interrupted by temporary model capacity limits, using the same model.
+```
+
+这是插件发送的恢复提示。若新的恢复回合也失败，会再次出现。插件负责替你继续尝试，不能让上游模型提前恢复容量。
+
+- 保持 CLI 会话打开、电脑不休眠。
+- 只处理**开启以后新检测到的容量错误**。如果安装前就已经失败，先手动发一次“继续”，之后再出现的容量错误会被监控。
+- 会话进入新回合、明确取消、出现其他错误或关闭插件时，可以终止旧的待恢复任务；关闭插件不会打断已经运行的 Codex 回合。
+- `enabled=true`、`running=true` 只表示后台进程已开启。要确认有没有实际续跑，还要看对应会话的 `attempts`、`status` 和 `reason`。
+
+## 环境与排查
+
+需要 macOS 或 Linux、Python 3.11 及以上，以及支持 `codex queue` 和 `codex plugin add` 的 Codex CLI。已经在 **Codex 0.154.0** 上观察到真实 CLI 自动续跑。当前版本不覆盖 Windows、远程或云端会话。
+
+没有自动恢复时，可以复制这一段：
+
+```text
+$capacity-guard 请排查当前 CLI 会话的自动恢复。检查 backend 是否为 queue、watcher 是否运行着当前安装版本、最近的容量错误是否发生在开启之后，并显示对应的 attempts、status、reason。不要只凭 enabled=true 或 doctor 成功就判断续跑已送达。
+```
+
+如果当前模型已经不可用，它就无法执行安装或配置 skill。可以先在能响应的 Codex 对话中配置，或使用[终端命令](docs/usage.md#terminal-commands)。开启后的 watcher 独立运行，不依赖当前模型响应。
+
+更新插件、终端操作、重试间隔、数据位置和可选后端见[进阶使用说明](docs/usage.md)。测试范围和限制见[验证记录](docs/verification.md)。
+
+## 开发与许可证
 
 ```sh
-python3 scripts/install_plugin.py
+python3 -m unittest discover -s tests -v
 ```
 
-按安装脚本的结果让插件在 Codex 中可用。之后可以让 Codex 使用 Capacity Guard skill 检查环境、开启或关闭恢复。Skill 与命令行调用的是同一套本地功能。
+默认测试使用本地合成数据；可选的 [App Server 冒烟测试](tests/smoke_transport.py) 使用隔离环境和本地模型模拟服务。贡献说明见 [CONTRIBUTING.md](CONTRIBUTING.md)。
 
-如果直接从终端管理，在虚拟环境安装 CLI：
-
-```sh
-python3 -m venv .venv
-.venv/bin/python -m pip install -e .
-.venv/bin/codex-capacity-guard doctor
-.venv/bin/codex-capacity-guard enable
-.venv/bin/codex-capacity-guard status
-```
-
-只监控指定会话：
-
-```sh
-.venv/bin/codex-capacity-guard enable --thread YOUR_THREAD_ID
-```
-
-取消某个会话当前的待恢复任务，或者关闭整个后台恢复：
-
-```sh
-.venv/bin/codex-capacity-guard cancel --thread YOUR_THREAD_ID
-.venv/bin/codex-capacity-guard disable
-```
-
-不传 `--thread` 的 `enable` 会监听本地主会话中符合条件的新错误，不会补跑历史错误。正常使用不需要新增模型 API 密钥，恢复请求通过现有 Codex 应用和账户执行。
-
-## 配置与本地数据
-
-状态目录默认是 `$CODEX_HOME/capacity-guard`；未设置 `CODEX_HOME` 时为 `~/.codex/capacity-guard`。可以通过 `CODEX_CAPACITY_GUARD_HOME` 指定其他目录。
-
-该目录下的 `config.json` 支持：
-
-```json
-{
-  "initial_delay": 30,
-  "max_delay": 120,
-  "poll_interval": 2,
-  "jitter": 0.15,
-  "codex_bin": "",
-  "socket_path": null,
-  "backend": "auto"
-}
-```
-
-`codex_bin` 留空时优先查找 PATH 中的 `codex`，也可以设置 `CODEX_CAPACITY_GUARD_CODEX`。`socket_path` 用于指定现有 App Server 或桌面 IPC socket。修改配置后先 `disable`，再 `enable`。
-
-插件在本地保存调度状态、会话和回合 ID、模型名及有限条审计记录，不会将完整聊天记录、错误正文或凭据复制进状态数据库。为了避免恢复过期错误，会向本地应用读取会话元数据。恢复后的 Codex 回合仍按照原会话的授权使用网络和工具。
-
-`disable` 关闭恢复，但保留本地配置和记录。提交诊断材料时，不要上传状态数据库、Codex 日志、真实会话导出或密钥。
-
-## 排查
-
-先运行：
-
-```sh
-codex-capacity-guard doctor
-codex-capacity-guard status
-```
-
-- **找不到日志数据库：** 打开 Codex 并运行一个本地会话，确认插件与应用使用同一个 `CODEX_HOME`。
-- **找不到兼容连接：** 保持 Codex 运行，检查可执行文件和后端。桌面应用更新可能改变私有 IPC。
-- **开启后没有动作：** 首次启动跳过旧错误；已失败的会话需要先手动继续一次，后续新容量错误才会进入监控。
-- **会话已经继续：** 原失败回合不再是待恢复目标时，撤销重试，避免重新唤起已完成或手动继续的任务。
-- **模型一直不可用：** 开启期间持续等待原模型。用 `status` 查看计划，用 `disable` 停止。
-
-## 开发
-
-```sh
-python3 -m unittest discover -s tests -p 'test_*.py'
-```
-
-默认测试完全离线，只使用合成数据。可选的 App Server 传输冒烟测试使用临时 `CODEX_HOME` 和本地模型替身，运行前请阅读 [`tests/smoke_transport.py`](tests/smoke_transport.py)。该测试不能证明桌面 IPC 兼容。
-
-贡献和问题报告说明见 [CONTRIBUTING.md](CONTRIBUTING.md)，采用 [MIT 许可证](LICENSE)。
-
-## 验证结果与当前限制
-
-- 离线单元及集成测试覆盖错误识别、无限退避、取消、原线程恢复、hook、socket 协议及不确定的发送结果。
-- 已用 macOS 上的 Codex CLI 0.153.4、隔离的 `CODEX_HOME` 和本地 Responses 模拟服务实测：失败回合 → 同一已加载线程续跑 → 完成，模型保持一致，未调用真实模型服务。
-- 桌面适配使用 snapshot 协议 11、start-turn 协议 2，已通过模拟桌面 owner 的 socket 测试；**本版本尚未实测真实桌面里的自动续跑效果**。
-- IPC 不暴露输入框草稿，也没有原子的 expected-turn 条件。发送前会重新检查会话状态，但与用户同时操作仍有很小的竞态窗口；发现待审批请求时会等待。
-- 不带 `--thread` 的 `doctor` 只检查环境，找到 socket 会返回 `socket_present_unverified`。`doctor --thread UUID` 只读验证 owner 和会话状态，两者都不是实际发送测试。
-- 电脑休眠、应用关闭、找不到 owner 或 IPC 不兼容时继续等待。发送结果不确定时，只核对原线程，不直接再次发送，以免重复执行。
-
-具体证据范围见[验证记录](docs/verification.md)。
+这是独立社区项目，采用 [MIT 许可证](LICENSE)。
