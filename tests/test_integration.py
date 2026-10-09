@@ -1,6 +1,5 @@
 """Offline end-to-end: SQLite error -> waiting -> actual socket -> same thread."""
 
-import copy
 import sqlite3
 import tempfile
 import unittest
@@ -11,7 +10,7 @@ from capacity_guard.config import Settings
 from capacity_guard.log_source import LogSource
 from capacity_guard.recovery import RecoveryEngine
 from capacity_guard.state import Store
-from test_desktop import FakeDesktop, STATE
+from test_desktop import FakeDesktop
 from test_log_source import THREAD, TURN, failure_body
 
 
@@ -33,20 +32,30 @@ class IntegrationTests(unittest.TestCase):
             path = directory / "logs_2.sqlite"
             with sqlite3.connect(path) as writer:
                 writer.execute("CREATE TABLE logs(id INTEGER PRIMARY KEY,ts INTEGER,ts_nanos INTEGER,target TEXT,feedback_log_body TEXT,thread_id TEXT)")
-                writer.execute("INSERT INTO logs VALUES (1,1000,0,?,?,?)", ("codex_core::session::turn", failure_body(model="original-model"), THREAD))
+                # Codex 0.161 uses underscore field names; quoted values must
+                # still recover the original model and conversation.
+                body = failure_body(
+                    thread=f'"{THREAD}"', turn=f'"{TURN}"', model='"original-model"',
+                    thread_key="thread_id", turn_key="turn_id",
+                )
+                writer.execute("INSERT INTO logs VALUES (1,1000,0,?,?,?)", ("codex_core::session::turn", body, THREAD))
             writer.close()
             events, _ = LogSource(path).read_after(0)
             self.assertEqual(1, len(events))
+            self.assertEqual((THREAD, TURN, "original-model"),
+                             (events[0].thread_id, events[0].turn_id, events[0].model))
             # Translate only the test address after exercising the strict reader.
             from dataclasses import replace
             event = replace(events[0], thread_id="thread-1", turn_id="turn-failed")
             engine.observe(event)
+            self.assertEqual("original-model", store.recovery(event.thread_id)["model"])
             engine.tick()
             self.assertEqual([], desktop.sent)
             now[0] += 30
             engine.tick()
             self.assertEqual(1, len(desktop.sent))
             sent = desktop.sent[0]["params"]["turnStart"]
+            self.assertEqual(event.thread_id, sent["request"]["threadId"])
             self.assertTrue(sent["context"]["inheritThreadSettings"])
             self.assertNotIn("model", sent["request"])
             token = store.recovery("thread-1")["token"]

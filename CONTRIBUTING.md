@@ -39,3 +39,20 @@ Do not publish exploitable security details in a public issue. Contact a reposit
 Use a small, reviewable diff. Explain the behavior change, the compatibility assumptions, and the checks actually run. Update both README languages when commands, configuration, or compatibility limits change.
 
 By submitting a contribution, you agree that it is licensed under this repository's MIT license.
+
+## Publishing an update
+
+Make runtime fixes in this repository, even if they were first tested in a local
+plugin cache. Copy only the intended changes; installed caches may contain older
+documentation. Add synthetic regression fixtures without real log bodies.
+
+Before publishing, update the version together in `.codex-plugin/plugin.json`,
+`pyproject.toml` and `capacity_guard/__init__.py`. The plugin version must change
+so an install uses a new cache directory. Update both README languages and
+`docs/verification.md` with the checks actually run and their limits.
+
+Run the offline tests above and `git diff --check`, review the diff, then commit
+and push to GitHub. A push does not update existing users' local checkouts,
+installed caches or watcher processes. Point users to the
+[update instructions](docs/usage.md#updates--更新插件): pull the source, reinstall
+the plugin, and restart an already-enabled watcher with its original scope.

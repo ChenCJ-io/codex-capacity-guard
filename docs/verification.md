@@ -1,4 +1,38 @@
-# Verification — updated 2026-09-16
+# Verification — updated 2026-10-09
+
+## 0.1.1 compatibility release
+
+The working local plugin cache contained a log-parser patch that was absent
+from the source repository. This release brings that fix into the distributed
+package: dotted and underscored thread/turn fields are both accepted, and one
+balanced pair of double quotes is allowed around UUID and model values.
+Conflicting aliases, mismatched thread IDs and malformed UUID values are rejected.
+Quoted user/tool text still cannot trigger recovery.
+
+On macOS with Python 3.14 and Codex CLI 0.161.0 installed:
+
+```sh
+python3 -m unittest discover -s tests -q
+git diff --check
+```
+
+All 80 offline tests passed. New log fixtures cover both field spellings and
+independently quoted values. The synthetic SQLite-to-socket integration covers
+the underscored format, original thread/model and inherited settings. Running
+the updated log/integration tests against the previous parser in a temporary
+directory failed, including the new-format recovery case.
+
+The suite still emits existing Python 3.14 SQLite `ResourceWarning` messages;
+these were also present before the compatibility change. Version consistency
+was checked across the Python package, `pyproject.toml` and plugin manifest.
+The installer was run with the PATH Codex binary; `codex plugin list
+--marketplace personal --json` reported installed version `0.1.1`, and the new
+cache's runtime files matched the source. The already-running, locally patched
+watcher was left running to preserve pending recoveries; this cache check is not
+evidence that that process reloaded the new release.
+No live capacity failure was induced and no recovery message was sent for this
+release check. These tests do not establish end-to-end live delivery on 0.161.0
+or compatibility with every later Codex version.
 
 ## Observed CLI recovery
 

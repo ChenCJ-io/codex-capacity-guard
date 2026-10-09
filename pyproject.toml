@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "codex-capacity-guard"
-version = "0.1.0"
+version = "0.1.1"
 description = "Resume local Codex conversations after model capacity errors, without switching models."
 requires-python = ">=3.11"
 license = {text = "MIT"}

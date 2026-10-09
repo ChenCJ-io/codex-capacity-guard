@@ -20,6 +20,24 @@ This paragraph asks Codex to install **and enable** recovery. Running the instal
 
 If the skill is not visible after installation, restart the CLI or resume your conversation in a new CLI process so it picks up the plugin. Review new hooks through `/hooks` if Codex asks. You do not need the desktop app.
 
+## Already installed? Update to 0.1.1
+
+**0.1.1 adds compatibility with changed Codex log fields.** It accepts both
+`thread.id` / `turn.id` and `thread_id` / `turn_id`, including quoted values.
+An older watcher can appear to be running while missing capacity failures in
+the newer format.
+
+Paste this into a working Codex conversation:
+
+```text
+Please update my existing installation of https://github.com/ChenCJ-io/codex-capacity-guard to the latest main (at least 0.1.1). Locate the existing checkout and record enabled and threads. Run git pull --ff-only only if the checkout is clean; do not overwrite local changes. If the watcher is enabled or running, disable it and wait until status --json reports running=false. Run python3 scripts/install_plugin.py with --codex-bin set to the Codex executable on PATH. Verify that the source, installed cache and python3 scripts/capacity_guard.py --version agree. Re-enable from the updated script only if recovery was enabled before, restoring the original threads scope; otherwise keep it disabled. Preserve my model, provider, account, reasoning, permissions and waiting intervals. Report the commit, version and watcher state. If skills or hooks need refreshing, tell me to restart the CLI and review /hooks without bypassing trust. If the current thread ID is available, run doctor --thread and report diagnostics separately from actual recovery delivery.
+```
+
+**Pulling the repository alone does not refresh the installed plugin cache or
+reload a running watcher.** See [terminal update steps](docs/usage.md#updates--更新插件).
+Restarting cancels pending recoveries; send “continue” once in any conversation
+that was already stopped by a capacity error, so later failures can be monitored.
+
 ## Use it in conversation
 
 Send **one** of these messages in your Codex CLI conversation:
@@ -60,7 +78,7 @@ That is the plugin's continuation message. It can appear more than once if separ
 
 ## Requirements and troubleshooting
 
-Use macOS or Linux, Python 3.11+, and a Codex CLI that supports `codex queue` and `codex plugin add`. CLI recovery has been observed on **Codex 0.154.0**. Windows and remote/cloud sessions are not covered by this release.
+Use macOS or Linux, Python 3.11+, and a Codex CLI that supports `codex queue` and `codex plugin add`. CLI recovery has been observed on **Codex 0.154.0**. **0.1.1** publishes the local Codex 0.161 compatibility fix with offline regression coverage; see [Verification](docs/verification.md) for the exact evidence and limits. Windows and remote/cloud sessions are not covered by this release.
 
 If recovery does not happen, paste:
 

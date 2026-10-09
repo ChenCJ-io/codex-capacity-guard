@@ -82,8 +82,58 @@ conversation's audit/status and actual new turn to verify delivery.
 Copy this into a working Codex CLI conversation:
 
 ```text
-请更新 https://github.com/ChenCJ-io/codex-capacity-guard 的本地安装。先定位已有源码目录，记录当前启用状态和监控范围；工作区干净时拉取最新 main，不覆盖本地修改。若 watcher 正在运行，先 disable，再等待 status --json 确认 running=false。使用 PATH 中的 codex 运行更新后的 scripts/install_plugin.py --codex-bin，并确认已安装版本。原来已开启的才从更新后的脚本重新 enable，并恢复原监控范围；原来关闭的保持关闭。最后报告源码提交、插件版本和 watcher 状态；如果 skill 或 hooks 尚未刷新，告诉我如何重启 CLI 或恢复对话。
+请更新 https://github.com/ChenCJ-io/codex-capacity-guard 的本地安装到最新 main（至少 0.1.1）。先定位已有源码目录，记录 enabled 和 threads；工作区干净时执行 git pull --ff-only，不覆盖本地修改。若 watcher 已开启或正在运行，先 disable，再等待 status --json 确认 running=false。使用 PATH 中的 codex 运行更新后的 scripts/install_plugin.py --codex-bin，确认源码、安装缓存和 scripts/capacity_guard.py --version 版本一致。原来已开启的才从更新后的脚本重新 enable，并恢复原 threads 范围；原来关闭的保持关闭。保留模型、Provider、账号、推理强度、权限和等待间隔。最后报告源码提交、插件版本和 watcher 状态；如果 skill 或 hooks 尚未刷新，告诉我如何重启 CLI 或恢复对话，并按需在 /hooks 审阅。
 ```
+
+For a terminal update, use the **existing checkout**, which may be elsewhere:
+在终端更新时，进入**已有源码目录**；如果不是下面的路径，请替换它。
+
+```sh
+cd ~/plugins/codex-capacity-guard
+python3 scripts/capacity_guard.py status --json
+git status --short
+```
+
+Record `enabled` and `threads`. If Git reports local changes, resolve them before
+continuing; do not reset or overwrite them. With a clean checkout:
+记录 `enabled` 和 `threads`。Git 有本地改动时先处理，不要覆盖；工作区干净后执行：
+
+```sh
+git pull --ff-only origin main
+python3 scripts/capacity_guard.py disable
+python3 scripts/capacity_guard.py status --json
+```
+
+Wait until `running=false`, then install the new cache:
+等 `running=false` 后再安装新版缓存：
+
+```sh
+python3 scripts/install_plugin.py --codex-bin "$(command -v codex)"
+python3 scripts/capacity_guard.py --version
+```
+
+The compatibility release is `0.1.1`. A failed installer must be resolved before
+restarting. If recovery was enabled with `threads: []`, run:
+本次兼容版本为 `0.1.1`。安装失败时先处理错误。若原来已开启且 `threads: []`，执行：
+
+```sh
+python3 scripts/capacity_guard.py enable
+python3 scripts/capacity_guard.py status --json
+```
+
+For a restricted scope, use `enable --thread UUID` with each original UUID
+(repeat `--thread` for multiple threads). If previously disabled, skip `enable`.
+Use `doctor --thread UUID` for a read-only check of an available conversation.
+Restart the CLI, resume the conversation and review `/hooks` if Codex requests it.
+仅监控指定会话时，对原来的每个 UUID 传入 `--thread`；原来关闭的不要执行 `enable`。
+可用 `doctor --thread UUID` 只读诊断现有会话。重启 CLI、恢复会话，并按提示审阅 `/hooks`。
+
+The personal marketplace points to a local checkout. A GitHub push or a
+marketplace refresh alone does not pull that checkout or replace the installed
+cache; run both `git pull --ff-only` and the installer. Each release changes
+`.codex-plugin/plugin.json`'s version so Codex installs into a new cache directory.
+个人市场引用的是本地源码；GitHub 推送或市场刷新不会代替拉取源码、重新安装缓存。
+每次发布都会更新插件版本，避免继续使用旧版缓存。
 
 Updating files does not reload a running Python watcher. Disable it, wait for
 `running=false`, then enable from the updated installation, preserving the previous

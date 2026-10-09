@@ -22,6 +22,22 @@
 
 如果安装后找不到 `$capacity-guard`，重启 CLI，或在新的 CLI 进程中恢复原对话，让它加载新插件。若提示 hooks 待信任，进入 `/hooks` 审阅。**整个流程不需要桌面应用。**
 
+## 已安装用户：更新到 0.1.1
+
+**0.1.1 补上 Codex 更新后的日志格式兼容**：同时识别 `thread.id` / `turn.id` 和
+`thread_id` / `turn_id`，以及带双引号的字段值。旧版可能仍显示 watcher 正在运行，
+却无法识别这种格式的容量错误。
+
+在能正常响应的 Codex 对话中粘贴：
+
+```text
+请更新 https://github.com/ChenCJ-io/codex-capacity-guard 的本地安装到最新 main（至少 0.1.1）。先定位已有源码目录，记录当前 enabled 和 threads；工作区干净时执行 git pull --ff-only，不覆盖本地修改。若 watcher 已开启或正在运行，先 disable，再等待 status --json 确认 running=false。使用 PATH 中的 codex 运行 python3 scripts/install_plugin.py --codex-bin，确认源码、安装缓存和 python3 scripts/capacity_guard.py --version 的版本一致。只在原来已开启时从新脚本重新 enable，并用原 threads 恢复监控范围；原来关闭的保持关闭。保留模型、Provider、账号、推理强度、权限和等待间隔。最后报告提交、版本、watcher 状态；如需刷新 skill 或 hooks，提示我重启 CLI 并在 /hooks 审阅，不绕过信任检查。若当前会话 ID 可用，再运行 doctor --thread，只报告诊断结果，不把它当作实际恢复成功。
+```
+
+**只拉取 GitHub 代码不会刷新已安装的插件缓存，也不会重载正在运行的 watcher。**
+完整终端步骤见[更新插件](docs/usage.md#updates--更新插件)。重启 watcher 会取消原有待恢复记录；
+更新前已因容量错误停下的对话，需要手动发送一次“继续”，之后的新错误会被监控。
+
 ## 日常使用：在对话里唤醒
 
 以后在 Codex CLI 对话里发送下面任意一条即可，每次只发送你需要的那一条：
@@ -62,7 +78,7 @@ Continue the task interrupted by temporary model capacity limits, using the same
 
 ## 环境与排查
 
-需要 macOS 或 Linux、Python 3.11 及以上，以及支持 `codex queue` 和 `codex plugin add` 的 Codex CLI。已经在 **Codex 0.154.0** 上观察到真实 CLI 自动续跑。当前版本不覆盖 Windows、远程或云端会话。
+需要 macOS 或 Linux、Python 3.11 及以上，以及支持 `codex queue` 和 `codex plugin add` 的 Codex CLI。已经在 **Codex 0.154.0** 上观察到真实 CLI 自动续跑；**0.1.1** 将本地 Codex 0.161 兼容补丁纳入发布和离线回归，具体验证边界见[验证记录](docs/verification.md)。当前版本不覆盖 Windows、远程或云端会话。
 
 没有自动恢复时，可以复制这一段：
 

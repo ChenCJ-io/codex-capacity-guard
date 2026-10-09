@@ -68,10 +68,10 @@ def main() -> int:
             if result.returncode:
                 print("CLI installation did not complete. Source is registered; open Codex Plugins and install Capacity Guard.", file=sys.stderr)
                 return 1
-            print("Plugin installed. Review its hooks in Codex, then run Capacity Guard doctor and enable.")
+            print("Plugin installed. Review its hooks in Codex, then check Capacity Guard status and doctor.")
         else:
             print("Source registered. Install Capacity Guard from the Codex Plugins screen.")
-        print("Recovery remains disabled until explicitly enabled.")
+        print("Installation does not enable recovery or restart a running watcher.")
         return 0
     except (OSError, ValueError, subprocess.TimeoutExpired) as error:
         print(str(error) if isinstance(error, ValueError) else type(error).__name__, file=sys.stderr)

@@ -2,6 +2,7 @@
 
 from pathlib import Path
 from contextlib import closing
+from itertools import product
 import sqlite3
 import tempfile
 import unittest
@@ -16,10 +17,11 @@ CAPACITY = "Selected model is at capacity. Please try a different model."
 TARGET = "codex_core::session::turn"
 
 
-def failure_body(error=CAPACITY, *, turn=TURN, model="gpt-6-astra"):
+def failure_body(error=CAPACITY, *, thread=THREAD, turn=TURN,
+                 model="gpt-6-astra", thread_key="thread.id", turn_key="turn.id"):
     model_field = f" model={model}" if model is not None else ""
     return (
-        f"thread{{thread.id={THREAD}}}:turn{{turn.id={turn}{model_field} "
+        f"thread{{{thread_key}={thread}}}:turn{{{turn_key}={turn}{model_field} "
         f"codex.turn.reasoning_effort=max}}:session_task.run:run_turn: "
         f"Turn error: {error}"
     )
@@ -60,12 +62,76 @@ class LogSourceTests(unittest.TestCase):
         )])
         self.assertNotIn(CAPACITY, repr(events))
 
+    def test_old_and_new_field_names_accept_independently_quoted_values(self):
+        cursor = 0
+        for thread_key, turn_key in product(
+            ("thread.id", "thread_id"), ("turn.id", "turn_id")
+        ):
+            for thread_quote, turn_quote, model_quote in product(("", '"'), repeat=3):
+                with self.subTest(keys=(thread_key, turn_key),
+                                  quotes=(thread_quote, turn_quote, model_quote)):
+                    log_id = self.insert(failure_body(
+                        thread=f"{thread_quote}{THREAD}{thread_quote}",
+                        turn=f"{turn_quote}{TURN}{turn_quote}",
+                        model=f"{model_quote}gpt-6-astra{model_quote}",
+                        thread_key=thread_key, turn_key=turn_key,
+                    ))
+                    events, cursor = self.source.read_after(cursor)
+                    self.assertEqual(events, [FailureEvent(
+                        log_id, 100.125, THREAD, TURN, "gpt-6-astra", True
+                    )])
+                    self.assertEqual(cursor, log_id)
+
+    def test_repeated_aliases_must_identify_the_same_thread_and_turn(self):
+        valid = self.insert(failure_body(
+            thread=f'{THREAD} thread_id="{THREAD}"',
+            turn=f'{TURN} turn_id="{TURN}"',
+            model='gpt-6-astra model="gpt-6-astra"',
+        ))
+        self.insert(failure_body(thread=f"{THREAD} thread_id={OTHER_TURN}"))
+        self.insert(failure_body(turn=f"{TURN} turn_id={OTHER_TURN}"))
+        self.insert(failure_body(thread=f"{THREAD} thread_id=invalid"))
+        last = self.insert(failure_body(turn=f"{TURN} turn_id=invalid"))
+        self.assertEqual(self.source.read_after(0), ([FailureEvent(
+            valid, 100.125, THREAD, TURN, "gpt-6-astra", True
+        )], last))
+
+    def test_uuid_quotes_must_be_one_balanced_pair(self):
+        invalid_values = (
+            '"{uuid}', '{uuid}"', '""{uuid}""', '""{uuid}"',
+            '"{uuid}""', "'{uuid}'", '"not-a-uuid"',
+        )
+        for thread_key, turn_key in (("thread.id", "turn.id"), ("thread_id", "turn_id")):
+            for value in invalid_values:
+                self.insert(failure_body(
+                    thread=value.format(uuid=THREAD),
+                    thread_key=thread_key, turn_key=turn_key,
+                ))
+                last = self.insert(failure_body(
+                    turn=value.format(uuid=TURN),
+                    thread_key=thread_key, turn_key=turn_key,
+                ))
+        self.assertEqual(self.source.read_after(0), ([], last))
+
+    def test_new_thread_alias_still_must_match_the_unquoted_database_thread(self):
+        body = failure_body(
+            thread=f'"{THREAD}"', turn=f'"{TURN}"',
+            thread_key="thread_id", turn_key="turn_id",
+        )
+        for thread in (OTHER_TURN, f'"{THREAD}"', None):
+            last = self.insert(body, thread=thread)
+        self.assertEqual(self.source.read_after(0), ([], last))
+
     def test_quoted_tool_and_user_text_do_not_trigger_recovery(self):
-        self.insert(f"ToolCall: shell({failure_body()!r})",
-                    target="codex_core::stream_events_utils")
-        self.insert(failure_body(), target="codex_core::stream_events_utils")
+        for body in (failure_body(), failure_body(
+            thread=f'"{THREAD}"', turn=f'"{TURN}"', model='"gpt-6-astra"',
+            thread_key="thread_id", turn_key="turn_id",
+        )):
+            self.insert(f"ToolCall: shell({body!r})",
+                        target="codex_core::stream_events_utils")
+            self.insert(body, target="codex_core::stream_events_utils")
+            self.insert(f"The user said: {body}")
         self.insert(CAPACITY)
-        self.insert(f"The user said: {failure_body()}")
         last = self.insert(f"Turn error: {CAPACITY}")
         self.assertEqual(self.source.read_after(0), ([], last))
 
@@ -79,17 +145,21 @@ class LogSourceTests(unittest.TestCase):
         self.assertNotIn(secret_error, repr(events[0]))
 
     def test_capacity_sentence_must_be_the_complete_error(self):
-        self.insert(failure_body(f"Server echoed: {CAPACITY}"))
-        self.insert(failure_body(f"{CAPACITY} Additional error."))
+        for thread_key, turn_key in (("thread.id", "turn.id"), ("thread_id", "turn_id")):
+            for error in (f"Server echoed: {CAPACITY}", f"{CAPACITY} Additional error."):
+                self.insert(failure_body(error, thread_key=thread_key, turn_key=turn_key))
         events, _ = self.source.read_after(0)
-        self.assertEqual([event.capacity for event in events], [False, False])
+        self.assertEqual([event.capacity for event in events], [False] * 4)
 
     def test_model_missing_or_ambiguous_is_empty(self):
         self.insert(failure_body(model=None))
         self.insert(failure_body(model="gpt-6-astra model=gpt-6-other"))
         self.insert(failure_body(model='gpt-6-astra model="invalid"'))
+        self.insert(failure_body(model='"gpt-6-astra'))
+        self.insert(failure_body(model='gpt-6-astra"'))
+        self.insert(failure_body(model='""gpt-6-astra""'))
         events, _ = self.source.read_after(0)
-        self.assertEqual([event.model for event in events], ["", "", ""])
+        self.assertEqual([event.model for event in events], [""] * 6)
 
     def test_span_depth_does_not_need_a_fixed_shape(self):
         self.insert(

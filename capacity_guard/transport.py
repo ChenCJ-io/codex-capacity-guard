@@ -19,6 +19,8 @@ import threading
 from dataclasses import dataclass, field
 from typing import Any
 
+from . import __version__
+
 
 MAX_MESSAGE = 64 * 1024 * 1024
 
@@ -80,7 +82,7 @@ class AppServerClient:
             self._reader = threading.Thread(target=self._read_messages, name="capacity-guard-rpc", daemon=True)
             self._reader.start()
             self.request("initialize", {
-                "clientInfo": {"name": "capacity_guard", "version": "0.1.0"},
+                "clientInfo": {"name": "capacity_guard", "version": __version__},
                 "capabilities": {"experimentalApi": True},
             })
             self._send_json({"method": "initialized"})

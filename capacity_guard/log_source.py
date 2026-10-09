@@ -30,8 +30,10 @@ _UUID_PATTERN = (
 )
 _UUID_RE = re.compile(_UUID_PATTERN)
 _SPAN_START_RE = re.compile(r"[A-Za-z_][A-Za-z0-9_.]*\{")
+# Codex log versions use either dotted or underscored routing fields, with
+# optional quoted values. Normalize both before checking routing consistency.
 _SPAN_FIELD_RE = re.compile(
-    r"(?:^|[\s{])(thread\.id|turn\.id|model)=([^\s{}]*)"
+    r"(?:^|[\s{])(thread[._]id|turn[._]id|model)=([^\s{}]*)"
 )
 _MODEL_RE = re.compile(r"[A-Za-z0-9][A-Za-z0-9_.:/+-]{0,127}")
 
@@ -80,7 +82,11 @@ def _parse_failure(row: tuple) -> FailureEvent | None:
 
     # Span depth can vary between Codex versions. Accept a consistent UUID
     # wherever it occurs in the prefix, but never look in the error body.
-    fields = _SPAN_FIELD_RE.findall(prefix)
+    fields = [
+        (name.replace("_", "."),
+         value[1:-1] if len(value) >= 2 and value.startswith('"') and value.endswith('"') else value)
+        for name, value in _SPAN_FIELD_RE.findall(prefix)
+    ]
     turn_ids = {_uuid(value) for name, value in fields if name == "turn.id"}
     if len(turn_ids) != 1 or None in turn_ids:
         return None
