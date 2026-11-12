@@ -1,4 +1,44 @@
-# Verification — updated 2026-10-09
+# Verification — updated 2026-11-06
+
+## 0.1.2 runtime compatibility
+
+Newer Codex logs use `session_task.run:run_turn{conversation.id=... turn.id=...}`
+instead of the unadorned `run_turn` span. The previous SQL filter and parser both
+required the old boundary, so a running watcher silently skipped these errors.
+The reader now accepts both formats while checking the runtime target, complete
+capacity sentence and consistent thread/turn fields, including the new span.
+
+A read-only check of local Codex 0.166-series logs found seven genuine runtime
+errors, including two capacity failures, that the old parser rejected. All seven
+parse with this change. Only routing metadata was reported; no historical error
+was submitted for recovery and no real log body or session ID is in the fixtures.
+
+The queue backend now excludes archived and subagent sessions before opening
+their histories, recognizes `turn_aborted`, and requires the complete recovery
+message prefix when confirming delivery. Diagnostics identify the Codex home and
+guard state directory so different environments can be distinguished.
+
+Synthetic regression tests reproduce the newer spans, deleted child histories,
+interrupts, quoted recovery tokens and the full log-to-queue recovery chain.
+The chain checks the initial delay, a second capacity failure with increased
+delay, original thread/model, delivery confirmation and no duplicate submission.
+All 97 offline tests passed on macOS with Python 3.14.
+
+Both opt-in smoke scripts also passed against a real Codex 0.166.0 app-server
+with a temporary home and loopback-only model stub. The queue smoke used the
+PATH Codex 0.164.0 client: a synthetic new-format capacity log plus a real failed
+rollout passed through `LogSource`, `RecoveryEngine` and `CodexBackend(queue)`
+to one completed continuation on the same thread/model, with two provider
+requests total. Its output explicitly marks `runtime_log_synthetic=true`;
+the native stub failure was not reported as a genuine upstream capacity event.
+The direct transport smoke also completed on the same loaded thread/model.
+
+```sh
+python3 tests/smoke_transport.py /path/to/server-codex
+python3 tests/smoke_queue.py /path/to/server-codex /path/to/queue-codex
+```
+
+These checks do not establish live recovery against an upstream model service.
 
 ## 0.1.1 compatibility release
 

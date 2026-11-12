@@ -102,7 +102,10 @@ def main(argv: list[str] | None = None) -> int:
             from .backends import CodexBackend
             settings = load_settings()
             source = LogSource(codex_home() / "logs_2.sqlite")
-            result = {"version": __version__, "codex_bin": settings.codex_bin or find_codex()}
+            result = {
+                "version": __version__, "codex_bin": settings.codex_bin or find_codex(),
+                "codex_home": str(codex_home()), "guard_home": str(state_dir()),
+            }
             try:
                 source.high_watermark()
                 result["log_source"] = "ready"
@@ -157,6 +160,8 @@ def main(argv: list[str] | None = None) -> int:
                 return 0
             result = store.status()
             result["running"] = is_running()
+            result["codex_home"] = str(codex_home())
+            result["guard_home"] = str(state_dir())
             if args.json:
                 print(json.dumps(result, indent=2))
             else:

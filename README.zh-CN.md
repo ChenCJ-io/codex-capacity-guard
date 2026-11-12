@@ -22,16 +22,16 @@
 
 如果安装后找不到 `$capacity-guard`，重启 CLI，或在新的 CLI 进程中恢复原对话，让它加载新插件。若提示 hooks 待信任，进入 `/hooks` 审阅。**整个流程不需要桌面应用。**
 
-## 已安装用户：更新到 0.1.1
+## 已安装用户：更新到 0.1.2
 
-**0.1.1 补上 Codex 更新后的日志格式兼容**：同时识别 `thread.id` / `turn.id` 和
-`thread_id` / `turn_id`，以及带双引号的字段值。旧版可能仍显示 watcher 正在运行，
-却无法识别这种格式的容量错误。
+**0.1.2 补上新版 `run_turn{...}` 日志格式兼容**，保留旧格式和带引号字段的支持。
+旧版 watcher 可能显示正在运行，却漏掉新格式的容量错误。此外，queue 后端会排除
+子会话和已归档会话，避免对已经删除的子会话历史持续轮询，并识别用户中断。
 
 在能正常响应的 Codex 对话中粘贴：
 
 ```text
-请更新 https://github.com/ChenCJ-io/codex-capacity-guard 的本地安装到最新 main（至少 0.1.1）。先定位已有源码目录，记录当前 enabled 和 threads；工作区干净时执行 git pull --ff-only，不覆盖本地修改。若 watcher 已开启或正在运行，先 disable，再等待 status --json 确认 running=false。使用 PATH 中的 codex 运行 python3 scripts/install_plugin.py --codex-bin，确认源码、安装缓存和 python3 scripts/capacity_guard.py --version 的版本一致。只在原来已开启时从新脚本重新 enable，并用原 threads 恢复监控范围；原来关闭的保持关闭。保留模型、Provider、账号、推理强度、权限和等待间隔。最后报告提交、版本、watcher 状态；如需刷新 skill 或 hooks，提示我重启 CLI 并在 /hooks 审阅，不绕过信任检查。若当前会话 ID 可用，再运行 doctor --thread，只报告诊断结果，不把它当作实际恢复成功。
+请更新 https://github.com/ChenCJ-io/codex-capacity-guard 的本地安装到最新 main（至少 0.1.2）。先定位已有源码目录，记录当前 enabled 和 threads；工作区干净时执行 git pull --ff-only，不覆盖本地修改。若 watcher 已开启或正在运行，先 disable，再等待 status --json 确认 running=false。使用 PATH 中的 codex 运行 python3 scripts/install_plugin.py --codex-bin，确认源码、安装缓存和 python3 scripts/capacity_guard.py --version 的版本一致。只在原来已开启时从新脚本重新 enable，并用原 threads 恢复监控范围；原来关闭的保持关闭。保留模型、Provider、账号、推理强度、权限和等待间隔。最后报告提交、版本、watcher 状态；如需刷新 skill 或 hooks，提示我重启 CLI 并在 /hooks 审阅，不绕过信任检查。若当前会话 ID 可用，再运行 doctor --thread，只报告诊断结果，不把它当作实际恢复成功。
 ```
 
 **只拉取 GitHub 代码不会刷新已安装的插件缓存，也不会重载正在运行的 watcher。**
@@ -78,7 +78,7 @@ Continue the task interrupted by temporary model capacity limits, using the same
 
 ## 环境与排查
 
-需要 macOS 或 Linux、Python 3.11 及以上，以及支持 `codex queue` 和 `codex plugin add` 的 Codex CLI。已经在 **Codex 0.154.0** 上观察到真实 CLI 自动续跑；**0.1.1** 将本地 Codex 0.161 兼容补丁纳入发布和离线回归，具体验证边界见[验证记录](docs/verification.md)。当前版本不覆盖 Windows、远程或云端会话。
+需要 macOS 或 Linux、Python 3.11 及以上，以及支持 `codex queue` 和 `codex plugin add` 的 Codex CLI。已经在 **Codex 0.154.0** 上观察到真实 CLI 自动续跑；**0.1.2** 兼容 Codex 0.166 系列的 `run_turn{...}` 日志，具体验证边界见[验证记录](docs/verification.md)。当前版本不覆盖 Windows、远程或云端会话。
 
 没有自动恢复时，可以复制这一段：
 
@@ -87,6 +87,10 @@ $capacity-guard 请排查当前 CLI 会话的自动恢复。检查 backend 是�
 ```
 
 如果当前模型已经不可用，它就无法执行安装或配置 skill。可以先在能响应的 Codex 对话中配置，或使用[终端命令](docs/usage.md#terminal-commands)。开启后的 watcher 独立运行，不依赖当前模型响应。
+
+如果使用多个 `CODEX_HOME`（例如默认环境和独立测试环境），它们各有自己的日志和
+watcher。`status --json` 和 `doctor` 的 `codex_home` / `guard_home` 会显示当前检查的
+位置；在一个环境里开启，不会自动监控另一个环境。详见[多环境说明](docs/usage.md#multiple-codex-homes--多个环境)。
 
 更新插件、终端操作、重试间隔、数据位置和可选后端见[进阶使用说明](docs/usage.md)。测试范围和限制见[验证记录](docs/verification.md)。
 
@@ -97,5 +101,8 @@ python3 -m unittest discover -s tests -v
 ```
 
 默认测试使用本地合成数据；可选的 [App Server 冒烟测试](tests/smoke_transport.py) 使用隔离环境和本地模型模拟服务。贡献说明见 [CONTRIBUTING.md](CONTRIBUTING.md)。
+
+[queue 冒烟测试](tests/smoke_queue.py) 用合成容量日志和隔离的本地模型模拟服务，
+验证真实 CLI 队列的恢复链路。
 
 这是独立社区项目，采用 [MIT 许可证](LICENSE)。

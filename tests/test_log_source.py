@@ -27,6 +27,24 @@ def failure_body(error=CAPACITY, *, thread=THREAD, turn=TURN,
     )
 
 
+def traced_failure_body(error=CAPACITY, *, thread=THREAD, turn=TURN,
+                        model="gpt-6.1-sol", thread_key="thread.id",
+                        turn_key="turn.id", run_turn_fields=None):
+    """Synthetic newer runtime framing, including the run_turn routing span."""
+    model_field = f" model={model}" if model is not None else ""
+    if run_turn_fields is None:
+        run_turn_fields = f"conversation.id={thread} {turn_key}={turn}"
+    return (
+        f"session_loop{{{thread_key}={thread}}}:"
+        f'submission_dispatch{{otel.name="submission" submission.id={turn} '
+        'codex.op="user_input"}:'
+        f"codex.turn_input{{conversation.id={thread} {turn_key}={turn}}}:"
+        f'turn{{otel.name="turn" {thread_key}={thread} {turn_key}={turn}'
+        f"{model_field} codex.turn.reasoning_effort=high}}:"
+        f"session_task.run:run_turn{{{run_turn_fields}}}: Turn error: {error}"
+    )
+
+
 class LogSourceTests(unittest.TestCase):
     def setUp(self):
         self.temp = tempfile.TemporaryDirectory()
@@ -81,6 +99,111 @@ class LogSourceTests(unittest.TestCase):
                         log_id, 100.125, THREAD, TURN, "gpt-6-astra", True
                     )])
                     self.assertEqual(cursor, log_id)
+
+    def test_run_turn_span_has_only_complete_routing_metadata(self):
+        log_id = self.insert(traced_failure_body(
+            thread=f'"{THREAD}"', turn=f'"{TURN}"', model='"gpt-6.1-sol"',
+        ))
+        events, cursor = self.source.read_after(0)
+        self.assertEqual((events, cursor), ([FailureEvent(
+            log_id, 100.125, THREAD, TURN, "gpt-6.1-sol", True
+        )], log_id))
+        self.assertNotIn(CAPACITY, repr(events))
+
+    def test_old_and_traced_turn_formats_can_share_one_batch(self):
+        old = self.insert(failure_body())
+        new = self.insert(traced_failure_body(turn=OTHER_TURN))
+        self.assertEqual(self.source.read_after(0), ([
+            FailureEvent(old, 100.125, THREAD, TURN, "gpt-6-astra", True),
+            FailureEvent(new, 100.125, THREAD, OTHER_TURN, "gpt-6.1-sol", True),
+        ], new))
+
+    def test_run_turn_fields_accept_independent_quotes_and_aliases(self):
+        cursor = 0
+        for thread_key, turn_key in product(
+            ("thread.id", "thread_id"), ("turn.id", "turn_id")
+        ):
+            for thread_quote, turn_quote, model_quote in product(("", '"'), repeat=3):
+                with self.subTest(keys=(thread_key, turn_key),
+                                  quotes=(thread_quote, turn_quote, model_quote)):
+                    log_id = self.insert(traced_failure_body(
+                        thread=f"{thread_quote}{THREAD}{thread_quote}",
+                        turn=f"{turn_quote}{TURN}{turn_quote}",
+                        model=f"{model_quote}gpt-6.1-sol{model_quote}",
+                        thread_key=thread_key, turn_key=turn_key,
+                    ))
+                    events, cursor = self.source.read_after(cursor)
+                    self.assertEqual(events, [FailureEvent(
+                        log_id, 100.125, THREAD, TURN, "gpt-6.1-sol", True
+                    )])
+                    self.assertEqual(cursor, log_id)
+
+    def test_run_turn_duplicate_turn_fields_must_be_valid_and_consistent(self):
+        valid = self.insert(traced_failure_body(
+            run_turn_fields=f'turn.id="{TURN}" turn_id={TURN}',
+        ))
+        for fields in (
+            f"turn.id={OTHER_TURN}",
+            f'turn.id="{TURN}" turn_id={OTHER_TURN}',
+            "turn.id=invalid",
+            f"turn.id={TURN} turn_id=invalid",
+            f'turn.id="{TURN}',
+            f'turn.id=""{TURN}""',
+        ):
+            last = self.insert(traced_failure_body(run_turn_fields=fields))
+        self.assertEqual(self.source.read_after(0), ([FailureEvent(
+            valid, 100.125, THREAD, TURN, "gpt-6.1-sol", True
+        )], last))
+
+    def test_run_turn_duplicate_thread_fields_must_match_database_thread(self):
+        valid = self.insert(traced_failure_body(
+            run_turn_fields=f'thread.id="{THREAD}" thread_id={THREAD} turn.id={TURN}',
+        ))
+        for thread in (OTHER_TURN, "invalid", f'"{OTHER_TURN}"'):
+            last = self.insert(traced_failure_body(
+                run_turn_fields=f"thread.id={thread} turn.id={TURN}",
+            ))
+        self.assertEqual(self.source.read_after(0), ([FailureEvent(
+            valid, 100.125, THREAD, TURN, "gpt-6.1-sol", True
+        )], last))
+
+    def test_run_turn_error_body_cannot_supply_missing_routing_fields(self):
+        unrouted = traced_failure_body().replace(f"turn.id={TURN}", "local.id=unknown")
+        self.insert(f"{unrouted} turn.id={TURN}")
+        last = self.insert(traced_failure_body(
+            error=f"{CAPACITY} model=gpt-6.1-sol", model=None,
+        ))
+        self.assertEqual(self.source.read_after(0), ([FailureEvent(
+            last, 100.125, THREAD, TURN, "", False
+        )], last))
+
+    def test_traced_tool_and_user_content_does_not_trigger_recovery(self):
+        body = traced_failure_body(thread=f'"{THREAD}"', turn=f'"{TURN}"')
+        self.insert(body, target="codex_core::stream_events_utils")
+        self.insert(f"ToolCall: shell({body!r})")
+        self.insert(f"The user said: {body}")
+        self.insert(f"{body!r}")
+        last = self.insert(f"Turn error: {CAPACITY}")
+        self.assertEqual(self.source.read_after(0), ([], last))
+
+    def test_run_turn_span_requires_runtime_error_framing(self):
+        body = traced_failure_body()
+        for malformed in (
+            body.replace("run_turn{", "other_task{"),
+            body.replace("}: Turn error: ", "}: User text: "),
+            body.replace("run_turn{", "run_turn{nested{"),
+            body.replace("session_task.run:", "session_task.run:\n"),
+            body.replace("}: Turn error: ", "}:wrapper: Turn error: "),
+        ):
+            last = self.insert(malformed)
+        self.assertEqual(self.source.read_after(0), ([], last))
+
+    def test_run_turn_span_requires_complete_capacity_error(self):
+        for error in (f"Server echoed: {CAPACITY}", f"{CAPACITY} Additional error."):
+            self.insert(traced_failure_body(error))
+        events, _ = self.source.read_after(0)
+        self.assertEqual([event.capacity for event in events], [False, False])
+        self.assertNotIn(CAPACITY, repr(events))
 
     def test_repeated_aliases_must_identify_the_same_thread_and_turn(self):
         valid = self.insert(failure_body(

@@ -8,6 +8,7 @@ import os
 import sqlite3
 import stat
 import subprocess
+from contextlib import closing
 from pathlib import Path
 
 from .config import Settings, codex_home, find_codex
@@ -163,11 +164,13 @@ class QueueBackend:
 
     def _thread_row(self, thread_id: str) -> tuple:
         try:
-            with sqlite3.connect("file:" + str(self._state_db()) + "?mode=ro", uri=True, timeout=0.5) as db:
-                row = db.execute("SELECT rollout_path,model,archived FROM threads WHERE id=?", (thread_id,)).fetchone()
+            with closing(sqlite3.connect("file:" + str(self._state_db()) + "?mode=ro", uri=True, timeout=0.5)) as db:
+                columns = {row[1] for row in db.execute("PRAGMA table_info(threads)")}
+                source_column = "source" if "source" in columns else "NULL"
+                row = db.execute("SELECT rollout_path,model,archived," + source_column + " FROM threads WHERE id=?", (thread_id,)).fetchone()
         except (OSError, sqlite3.Error):
             raise QueueUnavailable("Codex state database is unavailable") from None
-        if not row or row[2]:
+        if not row:
             raise QueueUnavailable("Codex session is unavailable")
         return row
 
@@ -188,6 +191,8 @@ class QueueBackend:
                         latest_id, latest_status, latest_token = payload["turn_id"], "inProgress", None
                     elif kind == "task_complete" and payload.get("turn_id") == latest_id:
                         latest_status = "failed" if payload.get("error") else "completed"
+                    elif kind == "turn_aborted" and payload.get("turn_id") == latest_id:
+                        latest_status = "interrupted"
                     elif kind in {"message", "item_completed"} and latest_id:
                         item = payload if kind == "message" else payload.get("item", {})
                         if kind == "message" and item.get("role") != "user":
@@ -195,7 +200,7 @@ class QueueBackend:
                         if kind == "item_completed" and item.get("type") != "UserMessage":
                             continue
                         text = "".join(item.get("text", "") for item in item.get("content", []) if isinstance(item, dict) and isinstance(item.get("text"), str))
-                        match = re.search(re.escape(MESSAGE_PREFIX) + r"([a-f0-9-]{36})\]", text)
+                        match = re.match(re.escape(MESSAGE_PREFIX) + r"([a-f0-9-]{36})\]\n", text)
                         if match:
                             latest_token = match.group(1)
         except (OSError, UnicodeError):
@@ -205,7 +210,17 @@ class QueueBackend:
         return Snapshot(latest_id, latest_status, model or "", latest_token, True, False)
 
     def inspect(self, thread_id: str) -> Snapshot:
-        rollout, model, _ = self._thread_row(thread_id)
+        rollout, model, archived, source = self._thread_row(thread_id)
+        if isinstance(source, str):
+            try:
+                source = json.loads(source)
+            except ValueError:
+                pass
+        child = isinstance(source, dict) and any("subagent" in str(key).lower() for key in source)
+        if archived or child:
+            # Child histories can already be removed. Reject them from routing
+            # metadata before trying to read their latest turn.
+            return Snapshot("", "unavailable", model or "", eligible=False)
         return self._rollout_snapshot(Path(rollout), thread_id, model)
 
     def resume(self, thread_id: str, message: str, model: str) -> str | None:

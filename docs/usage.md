@@ -65,6 +65,7 @@ conversation's pending recovery; it does not turn off recovery for future failur
 | --- | --- |
 | `enabled` | Recovery is configured on / 已配置为开启 |
 | `running` | The watcher process holds its lock / 后台进程正在运行 |
+| `codex_home` / `guard_home` | The Codex environment and guard state being checked / 当前检查的 Codex 环境与 guard 状态目录 |
 | `attempts` | Continuation attempts for the current recovery chain / 当前恢复链的尝试次数，不是成功次数 |
 | `waiting` | Waiting for the next attempt or a usable backend / 等待重试或等待后端可用 |
 | `submitted` | A continuation was submitted; completion is still being checked / 已提交续跑，仍在检查结果 |
@@ -77,12 +78,33 @@ conversation's pending recovery; it does not turn off recovery for future failur
 message. A successful result is not an end-to-end delivery test. Use the affected
 conversation's audit/status and actual new turn to verify delivery.
 
+## Multiple Codex homes / 多个环境
+
+Each `CODEX_HOME` has separate logs, sessions and guard state. A watcher started
+for the default home does not watch another home. Compare `codex_home` and
+`guard_home` in `status --json` or `doctor` with the affected session's environment.
+Run the management commands with that same `CODEX_HOME`; do not share
+`CODEX_CAPACITY_GUARD_HOME` between different Codex homes.
+
+每个 `CODEX_HOME` 都有独立日志、会话和 guard 状态。默认环境的 watcher 不会监控
+另一个环境。先检查 `status --json` 或 `doctor` 中的 `codex_home` / `guard_home`，
+再用发生错误的同一个 `CODEX_HOME` 运行管理命令。不同 Codex 环境不要共用
+`CODEX_CAPACITY_GUARD_HOME`。
+
+For example, replace the path with your actual alternate home:
+例如，把路径替换为实际使用的另一个环境：
+
+```sh
+CODEX_HOME=/path/to/alternate-home python3 scripts/capacity_guard.py enable
+CODEX_HOME=/path/to/alternate-home python3 scripts/capacity_guard.py status --json
+```
+
 ## Updates / 更新插件
 
 Copy this into a working Codex CLI conversation:
 
 ```text
-请更新 https://github.com/ChenCJ-io/codex-capacity-guard 的本地安装到最新 main（至少 0.1.1）。先定位已有源码目录，记录 enabled 和 threads；工作区干净时执行 git pull --ff-only，不覆盖本地修改。若 watcher 已开启或正在运行，先 disable，再等待 status --json 确认 running=false。使用 PATH 中的 codex 运行更新后的 scripts/install_plugin.py --codex-bin，确认源码、安装缓存和 scripts/capacity_guard.py --version 版本一致。原来已开启的才从更新后的脚本重新 enable，并恢复原 threads 范围；原来关闭的保持关闭。保留模型、Provider、账号、推理强度、权限和等待间隔。最后报告源码提交、插件版本和 watcher 状态；如果 skill 或 hooks 尚未刷新，告诉我如何重启 CLI 或恢复对话，并按需在 /hooks 审阅。
+请更新 https://github.com/ChenCJ-io/codex-capacity-guard 的本地安装到最新 main（至少 0.1.2）。先定位已有源码目录，记录 enabled 和 threads；工作区干净时执行 git pull --ff-only，不覆盖本地修改。若 watcher 已开启或正在运行，先 disable，再等待 status --json 确认 running=false。使用 PATH 中的 codex 运行更新后的 scripts/install_plugin.py --codex-bin，确认源码、安装缓存和 scripts/capacity_guard.py --version 版本一致。原来已开启的才从更新后的脚本重新 enable，并恢复原 threads 范围；原来关闭的保持关闭。保留模型、Provider、账号、推理强度、权限和等待间隔。最后报告源码提交、插件版本和 watcher 状态；如果 skill 或 hooks 尚未刷新，告诉我如何重启 CLI 或恢复对话，并按需在 /hooks 审阅。
 ```
 
 For a terminal update, use the **existing checkout**, which may be elsewhere:
@@ -112,9 +134,9 @@ python3 scripts/install_plugin.py --codex-bin "$(command -v codex)"
 python3 scripts/capacity_guard.py --version
 ```
 
-The compatibility release is `0.1.1`. A failed installer must be resolved before
+The compatibility release is `0.1.2`. A failed installer must be resolved before
 restarting. If recovery was enabled with `threads: []`, run:
-本次兼容版本为 `0.1.1`。安装失败时先处理错误。若原来已开启且 `threads: []`，执行：
+本次兼容版本为 `0.1.2`。安装失败时先处理错误。若原来已开启且 `threads: []`，执行：
 
 ```sh
 python3 scripts/capacity_guard.py enable

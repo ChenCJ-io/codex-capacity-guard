@@ -20,9 +20,12 @@ This paragraph asks Codex to install **and enable** recovery. Running the instal
 
 If the skill is not visible after installation, restart the CLI or resume your conversation in a new CLI process so it picks up the plugin. Review new hooks through `/hooks` if Codex asks. You do not need the desktop app.
 
-## Already installed? Update to 0.1.1
+## Already installed? Update to 0.1.2
 
-**0.1.1 adds compatibility with changed Codex log fields.** It accepts both
+**0.1.2 accepts the newer `run_turn{...}` log span** as well as the older format.
+It also skips subagent and archived sessions before reading their history, so
+deleted child histories no longer cause endless backend polling, and recognizes
+interrupted turns. It retains support for both
 `thread.id` / `turn.id` and `thread_id` / `turn_id`, including quoted values.
 An older watcher can appear to be running while missing capacity failures in
 the newer format.
@@ -30,7 +33,7 @@ the newer format.
 Paste this into a working Codex conversation:
 
 ```text
-Please update my existing installation of https://github.com/ChenCJ-io/codex-capacity-guard to the latest main (at least 0.1.1). Locate the existing checkout and record enabled and threads. Run git pull --ff-only only if the checkout is clean; do not overwrite local changes. If the watcher is enabled or running, disable it and wait until status --json reports running=false. Run python3 scripts/install_plugin.py with --codex-bin set to the Codex executable on PATH. Verify that the source, installed cache and python3 scripts/capacity_guard.py --version agree. Re-enable from the updated script only if recovery was enabled before, restoring the original threads scope; otherwise keep it disabled. Preserve my model, provider, account, reasoning, permissions and waiting intervals. Report the commit, version and watcher state. If skills or hooks need refreshing, tell me to restart the CLI and review /hooks without bypassing trust. If the current thread ID is available, run doctor --thread and report diagnostics separately from actual recovery delivery.
+Please update my existing installation of https://github.com/ChenCJ-io/codex-capacity-guard to the latest main (at least 0.1.2). Locate the existing checkout and record enabled and threads. Run git pull --ff-only only if the checkout is clean; do not overwrite local changes. If the watcher is enabled or running, disable it and wait until status --json reports running=false. Run python3 scripts/install_plugin.py with --codex-bin set to the Codex executable on PATH. Verify that the source, installed cache and python3 scripts/capacity_guard.py --version agree. Re-enable from the updated script only if recovery was enabled before, restoring the original threads scope; otherwise keep it disabled. Preserve my model, provider, account, reasoning, permissions and waiting intervals. Report the commit, version and watcher state. If skills or hooks need refreshing, tell me to restart the CLI and review /hooks without bypassing trust. If the current thread ID is available, run doctor --thread and report diagnostics separately from actual recovery delivery.
 ```
 
 **Pulling the repository alone does not refresh the installed plugin cache or
@@ -78,7 +81,7 @@ That is the plugin's continuation message. It can appear more than once if separ
 
 ## Requirements and troubleshooting
 
-Use macOS or Linux, Python 3.11+, and a Codex CLI that supports `codex queue` and `codex plugin add`. CLI recovery has been observed on **Codex 0.154.0**. **0.1.1** publishes the local Codex 0.161 compatibility fix with offline regression coverage; see [Verification](docs/verification.md) for the exact evidence and limits. Windows and remote/cloud sessions are not covered by this release.
+Use macOS or Linux, Python 3.11+, and a Codex CLI that supports `codex queue` and `codex plugin add`. CLI recovery has been observed on **Codex 0.154.0**. **0.1.2** supports the `run_turn{...}` logs used by Codex 0.166 builds; see [Verification](docs/verification.md) for the exact evidence and limits. Windows and remote/cloud sessions are not covered by this release.
 
 If recovery does not happen, paste:
 
@@ -87,6 +90,10 @@ $capacity-guard Diagnose automatic recovery for this CLI conversation. Check tha
 ```
 
 If the current model is already unavailable, it cannot run the skill to install or configure the plugin. Use the [terminal commands](docs/usage.md#terminal-commands), or set it up in a working Codex conversation first. Once enabled, the watcher runs independently of model calls.
+
+Separate `CODEX_HOME` environments have their own logs and watchers. Check the
+`codex_home` / `guard_home` fields in `status --json` or `doctor`; enabling one
+home does not monitor another. See [multiple homes](docs/usage.md#multiple-codex-homes--多个环境).
 
 For updates, terminal commands, waiting intervals, data locations and optional adapters, see [Advanced usage](docs/usage.md). See [Verification](docs/verification.md) for tested behavior and limits.
 
@@ -97,5 +104,8 @@ python3 -m unittest discover -s tests -v
 ```
 
 Tests use synthetic local fixtures. The optional [App Server smoke test](tests/smoke_transport.py) uses an isolated Codex installation and a loopback model stub. See [CONTRIBUTING.md](CONTRIBUTING.md) for contribution guidance.
+
+The [queue smoke test](tests/smoke_queue.py) exercises the native CLI queue with
+a synthetic capacity log and an isolated local model stub.
 
 Independent community project. Licensed under [MIT](LICENSE).

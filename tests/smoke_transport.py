@@ -9,6 +9,7 @@ requires no authentication and its only configured endpoint is loopback.
 
 from __future__ import annotations
 
+from contextlib import ExitStack
 import gzip
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 import json
@@ -95,6 +96,22 @@ def wait_turn(client: AppServerClient, thread_id: str, turn_id: str) -> dict:
     raise AssertionError("Synthetic turn did not finish within 25 seconds")
 
 
+def stop_process(process: subprocess.Popen | None) -> None:
+    if process is not None and process.poll() is None:
+        process.terminate()
+        try:
+            process.wait(timeout=5)
+        except subprocess.TimeoutExpired:
+            process.kill()
+            process.wait(timeout=5)
+
+
+def stop_model_stub(server: ThreadingHTTPServer, thread: threading.Thread) -> None:
+    server.shutdown()
+    server.server_close()
+    thread.join(timeout=2)
+
+
 def smoke(codex_bin: str) -> dict:
     ModelStub.requests_seen = []
     ModelStub.fail = True
@@ -103,11 +120,15 @@ def smoke(codex_bin: str) -> dict:
     server_thread.start()
     process = None
     try:
-        with tempfile.TemporaryDirectory(prefix="cg-", dir="/tmp") as root:
+        with ExitStack() as resources:
+            root = resources.enter_context(tempfile.TemporaryDirectory(prefix="cg-", dir="/tmp"))
+            resources.callback(stop_model_stub, server, server_thread)
             workspace = Path(root) / "workspace"
             workspace.mkdir()
             isolated = Path(root) / "codex"
             isolated.mkdir()
+            home = Path(root) / "home"
+            home.mkdir()
             socket = str(Path(root) / "app.sock")
             config = f'''
 model = "capacity-smoke"
@@ -131,16 +152,19 @@ stream_idle_timeout_ms = 2000
             (isolated / "config.toml").write_text(config)
             environment = {
                 key: os.environ[key]
-                for key in ("PATH", "HOME", "TMPDIR", "SYSTEMROOT", "LANG")
+                for key in ("PATH", "TMPDIR", "SYSTEMROOT", "LANG")
                 if key in os.environ
             }
             environment["CODEX_HOME"] = str(isolated)
+            environment["HOME"] = str(home)
+            environment["XDG_CONFIG_HOME"] = str(home / ".config")
             with patch.dict(os.environ, environment, clear=True):
                 process = subprocess.Popen(
                     [codex_bin, "app-server", "--listen", "unix://" + socket],
                     cwd=workspace, env=environment, stdin=subprocess.DEVNULL,
                     stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
                 )
+                resources.callback(stop_process, process)
                 deadline = time.monotonic() + 10
                 while not Path(socket).exists():
                     if process.poll() is not None:
@@ -148,6 +172,9 @@ stream_idle_timeout_ms = 2000
                     if time.monotonic() >= deadline:
                         raise AssertionError("Isolated app-server did not create its socket")
                     time.sleep(0.05)
+                # Newer Codex versions link the requested path to their actual
+                # control socket. Resolve only this isolated test's own path.
+                socket = str(Path(socket).resolve())
                 with AppServerClient(codex_bin, socket, timeout=10) as owner:
                     created = owner.request("thread/start", {"cwd": str(workspace), "historyMode": "legacy"})
                     thread_id = created["thread"]["id"]
@@ -168,16 +195,8 @@ stream_idle_timeout_ms = 2000
                         "local_provider_requests": len(ModelStub.requests_seen),
                     }
     finally:
-        if process is not None and process.poll() is None:
-            process.terminate()
-            try:
-                process.wait(timeout=5)
-            except subprocess.TimeoutExpired:
-                process.kill()
-                process.wait(timeout=5)
-        server.shutdown()
-        server.server_close()
-        server_thread.join(timeout=2)
+        stop_process(process)
+        stop_model_stub(server, server_thread)
 
 
 if __name__ == "__main__":

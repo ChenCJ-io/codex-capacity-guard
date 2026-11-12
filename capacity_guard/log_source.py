@@ -17,7 +17,12 @@ from uuid import UUID
 
 
 _TURN_TARGET = "codex_core::session::turn"
-_ERROR_BOUNDARY = "}:session_task.run:run_turn: Turn error: "
+_ERROR_MARKER = ": Turn error: "
+# Newer runtimes attach routing fields to run_turn itself. Validate that
+# framing separately so those fields remain in the prefix's consistency check.
+_TURN_END_RE = re.compile(
+    r"}:session_task\.run:run_turn(?:\{[^\r\n{}]*\})?\Z"
+)
 _CAPACITY_ERROR = (
     "Selected model is at capacity. Please try a different model."
 )
@@ -70,10 +75,11 @@ def _parse_failure(row: tuple) -> FailureEvent | None:
     ):
         return None
 
-    prefix, boundary, error = body.partition(_ERROR_BOUNDARY)
+    prefix, boundary, error = body.partition(_ERROR_MARKER)
     if (
         not boundary
         or not error.strip()
+        or _TURN_END_RE.search(prefix) is None
         or _SPAN_START_RE.match(prefix) is None
         or "\n" in prefix
         or "\r" in prefix
@@ -185,7 +191,7 @@ class LogSource:
                 "SELECT id, ts, ts_nanos, feedback_log_body, thread_id "
                 "FROM logs WHERE id > ? AND id <= ? AND target = ? "
                 "AND instr(feedback_log_body, ?) > 0 ORDER BY id",
-                (cursor, next_cursor, _TURN_TARGET, _ERROR_BOUNDARY),
+                (cursor, next_cursor, _TURN_TARGET, _ERROR_MARKER),
             )
             events = []
             for row in rows:

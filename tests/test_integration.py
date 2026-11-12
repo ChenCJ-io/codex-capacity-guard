@@ -1,9 +1,14 @@
 """Offline end-to-end: SQLite error -> waiting -> actual socket -> same thread."""
 
+import json
+import os
 import sqlite3
+import subprocess
 import tempfile
 import unittest
+from contextlib import closing
 from pathlib import Path
+from unittest.mock import patch
 
 from capacity_guard.backends import CodexBackend, snapshot_from_thread
 from capacity_guard.config import Settings
@@ -11,10 +16,92 @@ from capacity_guard.log_source import LogSource
 from capacity_guard.recovery import RecoveryEngine
 from capacity_guard.state import Store
 from test_desktop import FakeDesktop
-from test_log_source import THREAD, TURN, failure_body
+from test_log_source import THREAD, TURN, failure_body, traced_failure_body
 
 
 class IntegrationTests(unittest.TestCase):
+    def test_traced_capacity_errors_retry_through_queue_and_confirm_delivery(self):
+        with tempfile.TemporaryDirectory(prefix="cg-") as temp:
+            directory = Path(temp)
+            rollout = directory / "rollout.jsonl"
+            with closing(sqlite3.connect(directory / "state_5.sqlite")) as state, state:
+                state.execute("CREATE TABLE threads(id TEXT,rollout_path TEXT,model TEXT,archived INTEGER,source TEXT)")
+                state.execute("INSERT INTO threads VALUES (?,?,?,0,'cli')", (THREAD, str(rollout), "original-model"))
+            rollout.write_text("".join(json.dumps({"type": "event_msg", "payload": payload}) + "\n" for payload in [
+                {"type": "task_started", "turn_id": TURN},
+                {"type": "task_complete", "turn_id": TURN, "error": {"message": "synthetic capacity failure"}},
+            ]))
+            with closing(sqlite3.connect(directory / "logs_2.sqlite")) as writer:
+                writer.execute("CREATE TABLE logs(id INTEGER PRIMARY KEY,ts INTEGER,ts_nanos INTEGER,target TEXT,feedback_log_body TEXT,thread_id TEXT)")
+                store = Store(directory / "guard")
+                self.addCleanup(store.close)
+                store.set("enabled", True)
+                settings = Settings(backend="queue", codex_bin="synthetic-codex", jitter=0)
+                backend = CodexBackend(settings)
+                self.addCleanup(backend.close)
+                now = [1000.0]
+                engine = RecoveryEngine(store, backend, settings, lambda: now[0], lambda: .5)
+                source = LogSource(directory / "logs_2.sqlite")
+                cursor = 0
+                commands = []
+                next_turns = ["33333333-3333-4333-8333-333333333333", "44444444-4444-4444-8444-444444444444"]
+
+                def observe_failure(turn):
+                    nonlocal cursor
+                    writer.execute("INSERT INTO logs(ts,ts_nanos,target,feedback_log_body,thread_id) VALUES (?,0,?,?,?)", (
+                        int(now[0]), "codex_core::session::turn",
+                        traced_failure_body(turn=turn, model='"original-model"'), THREAD,
+                    ))
+                    writer.commit()
+                    events, cursor = source.read_after(cursor)
+                    self.assertEqual(1, len(events))
+                    engine.observe(events[0])
+
+                def queue(command, **_):
+                    commands.append(command)
+                    turn = next_turns[len(commands) - 1]
+                    message = command[command.index("--message") + 1]
+                    completion = {"type": "task_complete", "turn_id": turn}
+                    if len(commands) == 1:
+                        completion["error"] = {"message": "synthetic capacity failure"}
+                    records = [
+                        {"type": "event_msg", "payload": {"type": "task_started", "turn_id": turn}},
+                        {"type": "response_item", "payload": {"type": "message", "role": "user", "content": [{"type": "input_text", "text": message}]}},
+                        {"type": "event_msg", "payload": completion},
+                    ]
+                    with rollout.open("a") as stream:
+                        for record in records:
+                            stream.write(json.dumps(record) + "\n")
+                    return subprocess.CompletedProcess(command, 0, "", "")
+
+                with patch.dict(os.environ, {"CODEX_HOME": str(directory)}), patch("capacity_guard.backends.subprocess.run", side_effect=queue):
+                    observe_failure(TURN)
+                    engine.tick()
+                    self.assertEqual([], commands)
+                    now[0] += 30
+                    engine.tick()
+                    self.assertEqual(1, len(commands))
+                    now[0] += 2
+                    engine.tick()
+                    self.assertEqual("submitted", store.recovery(THREAD)["status"])
+                    self.assertEqual(1, len(commands))
+                    observe_failure(next_turns[0])
+                    self.assertEqual(now[0] + 60, store.recovery(THREAD)["next_at"])
+                    now[0] += 59
+                    engine.tick()
+                    self.assertEqual(1, len(commands))
+                    now[0] += 1
+                    engine.tick()
+                    now[0] += 2
+                    engine.tick()
+                    self.assertEqual("recovered", store.recovery(THREAD)["status"])
+                    self.assertEqual(2, store.recovery(THREAD)["attempts"])
+                    self.assertEqual(2, len(commands))
+                    for command in commands:
+                        self.assertEqual(["synthetic-codex", "queue", "--thread", THREAD, "--message"], command[:5])
+                        self.assertNotIn("--model", command)
+                    self.assertEqual("original-model", backend.inspect(THREAD).model)
+
     def test_full_recovery_and_manual_continuation_through_socket(self):
         # The desktop fake is intentionally addressed by its synthetic thread-1;
         # production errors still pass strict UUID validation at the log boundary.
